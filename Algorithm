@@ -27,7 +27,7 @@ tp <- matrix(c(
 
 ###observed data
 #!!define variable for observed data
-
+D0<-
 
 ###initializing storage for particles and weights
 particles <- vector("list", T)
@@ -111,7 +111,7 @@ for (t in 2:T) {
       D_star <- sim(model_star, parameter_star)
       
       #checking acceptance
-      if (distance(observed_data, D_star) <= e[t]) {
+      if (distance(D0, D_star) <= e[t]) {
         particles[[t]][[i]] <- list(model = model_star, parameter = parameter_star)
         break
       }
@@ -140,7 +140,7 @@ for (t in 2:T) {
   }
   
   #fallback for e[t] in case no acceptable particles
-  if (all(sapply(1:N, function(i) distance(observed_data, sim(
+  if (all(sapply(1:N, function(i) distance(D0, sim(
     particles[[t]][[i]]$model, particles[[t]][[i]]$parameter))) > e[t])) {
     e[t] <- e[t] * 1.5  #relaxing tolerance
   }
