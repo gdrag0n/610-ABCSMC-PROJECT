@@ -148,7 +148,7 @@ for (t in 2:T) {
 
 
 
-#MS3 normalizing Weights & computing posterior probs
+#MS3 computing posterior probs
 
 #computing posterior probs
 posterior <- sapply(models, function(m) {
