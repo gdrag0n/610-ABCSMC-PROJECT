@@ -85,6 +85,41 @@ sim <- function(model, parameter) {
 }
 
 
+compute_S <- function(model_star, parameter_star, particles_prev, wts_prev, models, sd_param) {
+  # Compute prior probability
+  prior_prob <- prior_probability(model_star, parameter_star, models)
+  
+  #computing normalization constant
+  normalization <- sum(sapply(1:length(particles_prev), function(j) {
+    if (particles_prev[[j]]$model == model_star) {
+      perturb_prob <- dnorm(
+        parameter_star, 
+        mean = particles_prev[[j]]$parameter, 
+        sd = sd_param
+      ) #perturbation kernel
+      return(perturb_prob * wts_prev[j])
+    } else {
+      return(0)
+    }
+  }))
+  
+  #computing particle weight
+  if (normalization > 0) {
+    return(prior_prob / normalization)
+  } else {
+    return(0) # Handle cases where normalization is zero
+  }
+}
+
+#cCompute prior probability for a given model and parameter
+prior_probability <- function(model, parameter, models) {
+  #evaluating prior probability based on model and prior distribution
+  if (model == 1) {
+    return(dunif(parameter, min = 0, max = 100)) # Uniform prior for Model 1
+  } else if (model == 2) {
+    return(dunif(parameter, min = 0, max = 100)) # Uniform prior for Model 2
+  }
+}
 
 
 
