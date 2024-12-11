@@ -38,7 +38,7 @@ wts <- vector("list", T)
 particles[[1]] <- lapply(1:N, function(i) {
   model <- sample(models, 1)  #prior model
   #sample parameter:
-  parameter <- pprior[[paste0("model", model)]]()  #pprior: prior parameters
+  parameter <- pprior[[paste0("m", model)]]()  #pprior: prior parameters
   list(model = model, parameter = parameter)
 })
 wts[[1]] <- rep(1 / N, N)  #considerng unifrm weights for the first population
