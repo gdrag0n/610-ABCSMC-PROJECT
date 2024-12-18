@@ -1,47 +1,46 @@
-#MS1
-#initializing variables
-
-##tolerances and population sizes
+# MS1 initializing variables: tolerances and population sizes
 #!!define the tolerance schedule (epsilon/e here)
-e <- 
-  
+e <- c(3000, 1400, 600, 140, 40)
+
 T <- length(e)    #populations count
 N <- 1000         #particles count
 
 ### priors for models and parameters
-models <- 1:2  #for 2 model count
-pprior <- list(
+models <- 1:2  #if 2 models
+parameter_prior <- list(
   #!!update this as per the required prior distribution
   #assuming  U(0,100) here
-  m1 = function() runif(1, 0, 100),  #if uniform prior for Model 1
-  m2 = function() runif(1, 0, 100)   #if uniform prior for Model 2
+  model1 = function() runif(1, 0, 100),  #let uniform prior for Model 1
+  model2 = function() runif(1, 0, 100)   #let uniform prior for Model 2
 )
 
-###transition probs
-#!!set the model transition probss as per requirement of the dataset's models
-tp <- matrix(c(
+###transition probabilities
+#!!set the model transition probabilities as per requirement of the dataset's models
+transition_probabilities <- matrix(c(
   0.8, 0.2,  #model 1
   0.2, 0.8   #model 2
 ), nrow = 2, byrow = TRUE)
 
 
 ###observed data
-#!!define variable for observed data
-D0<-
+path<-"C:/Goofenschmirtz/Laptop/Desktop/IUB/STAT 610 R/Project"
+setwd(path)
+observed_data <- read.csv('observed_data.csv')
+
 
 ###initializing storage for particles and weights
 particles <- vector("list", T)
-wts <- vector("list", T)
+weights <- vector("list", T)
 
 
 ###initializing 1st population
 particles[[1]] <- lapply(1:N, function(i) {
-  model <- sample(models, 1)  #prior model
-  #sample parameter:
-  parameter <- pprior[[paste0("m", model)]]()  #pprior: prior parameters
+  model <- sample(models, 1)  # Sample model from prior
+  # Sample parameter:
+  parameter <- parameter_prior[[paste0("model", model)]]()  
   list(model = model, parameter = parameter)
 })
-wts[[1]] <- rep(1 / N, N)  #considerng unifrm weights for the first population
+weights[[1]] <- rep(1 / N, N)  # Uniform weights for the first population
 
 
 
@@ -49,77 +48,70 @@ wts[[1]] <- rep(1 / N, N)  #considerng unifrm weights for the first population
 ###defining rudimentary functions
 
 #### distance function: mean-squared error
-distance <- function(D0, D_star) {
-  return(sum((D0 - D_star)^2))
+distance <- function(D0, D_s) {
+  return(sum((D0 - D_s)^2))
 }
 
 
-###model perturbation
+#####model perturbation kernel
 ##!!this will probably remain as is
 #refined model:
-refined <- function(m, models, tp) {
-return(sample(models, 1, prob = tp[m, ]))  
+refined <- function(m, models, transition_probabilities) {
+  return(sample(models, 1, prob = transition_probabilities[m, ]))  
 }
 
 
-###parameter perturbation
-#sig: standard deviation
-#!!adjust kernels as per the model
-#perturb parameters
-perturb <- function(theta, sig) { 
-  return(rnorm(1, mean = theta, sd = sig)) 
-  #gaussian perturbation since smc
-}
-
-
-###data simulation function
-##!! insert model parameters
-#simulate data: sim
-sim <- function(model, parameter) {
-  if (model == 1) {
-    #insert model1 parameters (x,y)
-    
-  } else {
-    #insert model2 parameters
-  }
-}
-
-
-compute_S <- function(model_star, parameter_star, particles_prev, wts_prev, models, sd_param) {
-  # Compute prior probability
-  prior_prob <- prior_probability(model_star, parameter_star, models)
+compute_S <- function(model_star, parameter_star, particles_prev, weights_prev, models, sd_param) {
+  # Compute the numerator of the weight
+  prior_prob <- 1 / length(models)  # Assuming uniform prior for models
+  likelihood_prior <- prior_prob * dnorm(parameter_star, mean = 0, sd = 100)  # Uniform(0,100) prior
   
-  #computing normalization constant
-  normalization <- sum(sapply(1:length(particles_prev), function(j) {
-    if (particles_prev[[j]]$model == model_star) {
-      perturb_prob <- dnorm(
-        parameter_star, 
-        mean = particles_prev[[j]]$parameter, 
-        sd = sd_param
-      ) #perturbation kernel
-      return(perturb_prob * wts_prev[j])
-    } else {
-      return(0)
-    }
+  # Compute the denominator of the weight
+  sum_weights <- sum(sapply(1:length(particles_prev), function(j) {
+    # Transition probabilities for model
+    trans_prob <- transition_probabilities[particles_prev[[j]]$model, model_star]
+    
+    # Perturbation kernel density for parameters
+    perturb_density <- dnorm(
+      parameter_star,
+      mean = particles_prev[[j]]$parameter,
+      sd = sd_param
+    )
+    
+    weights_prev[j] * trans_prob * perturb_density
   }))
   
-  #computing particle weight
-  if (normalization > 0) {
-    return(prior_prob / normalization)
+  # Final weight
+  weight <- likelihood_prior / sum_weights
+  return(weight)
+}
+
+
+###parameter perturbation kernel
+#sig- standard deviation
+#!!adjust kernels as per the model
+perturb_parameters <- function(theta, sd) {
+  return(rnorm(1, mean = theta, sd = sd)) 
+  # Gaussian perturbation since smc
+}
+
+
+
+### data simulation function
+##!! insert model parameters
+simulate_data <- function(model, parameter) {
+  if (model == 1) {
+    # Model 1: X + Y -> 2Y
+    k1 <- parameter  # Reaction rate for model 1
+    return(gillespie_simulation(k1 = k1, k2 = 0, X0 = 40, Y0 = 3, time_max = 0.1))
   } else {
-    return(0) # Handle cases where normalization is zero
+    # Model 2: X -> Y
+    k2 <- parameter  # Reaction rate for model 2
+    return(gillespie_simulation(k1 = 0, k2 = k2, X0 = 40, Y0 = 3, time_max = 0.1))
   }
 }
 
-#cCompute prior probability for a given model and parameter
-prior_probability <- function(model, parameter, models) {
-  #evaluating prior probability based on model and prior distribution
-  if (model == 1) {
-    return(dunif(parameter, min = 0, max = 100)) # Uniform prior for Model 1
-  } else if (model == 2) {
-    return(dunif(parameter, min = 0, max = 100)) # Uniform prior for Model 2
-  }
-}
+
 
 
 
@@ -128,75 +120,76 @@ prior_probability <- function(model, parameter, models) {
 
 for (t in 2:T) {
   particles[[t]] <- vector("list", N)
-  wts[[t]] <- numeric(N)
+  weights[[t]] <- numeric(N)
   
   for (i in 1:N) {
     repeat {
       #resampling + refining
-      idx <- sample(1:N, 1, prob = wts[[t - 1]])  #resampling from prev population
+      idx <- sample(1:N, 1, prob = weights[[t - 1]])  #resampling from prev population
       model_star <- refined( #refining
-        particles[[t - 1]][[idx]]$model, models, tp
+        particles[[t - 1]][[idx]]$model, models, transition_probabilities
       )
-      parameter_star <- perturb(
-        particles[[t - 1]][[idx]]$parameter,
-        sd = 2 * diff(range(unlist(lapply(particles[[t - 1]], function(p) p$parameter))))
-      )
+      parameter_star <- perturb_parameters(particles[[t - 1]][[idx]]$parameter, 
+                                           sd = 2 * diff(range(unlist(lapply(particles[[t - 1]], 
+                                                                             function(p) p$parameter)))))
+      
       
       #simulating candidate dataset
-      D_star <- sim(model_star, parameter_star)
+      D_star <- simulate_data(model_star, parameter_star)
       
       #checking acceptance
-      if (distance(D0, D_star) <= e[t]) {
+      if (distance(observed_data, D_star) <= e[t]) {
         particles[[t]][[i]] <- list(model = model_star, parameter = parameter_star)
         break
       }
     }
     
     #computing weights
-    wts[[t]][i] <- compute_S(
+    weights[[t]][i] <- compute_S(
       model_star = particles[[t]][[i]]$model,
       parameter_star = particles[[t]][[i]]$parameter,
       particles_prev = particles[[t - 1]],
-      wts_prev = wts[[t - 1]],
+      weights_prev = weights[[t - 1]],
       models = models,
       sd_param = sig
     )
   }
   
   #normalizing weights
-  wts[[t]] <- wts[[t]] / sum(wts[[t]])
+  weights[[t]] <- weights[[t]] / sum(weights[[t]])
   
-  #handling degeneracy w ESS
-  ESS <- 1 / sum(wts[[t]]^2)
+  #handling degeneracy with ESS
+  ESS <- 1 / sum(weights[[t]]^2)
   if (ESS < N / 2) {
-    indices <- sample(1:N, N, replace = TRUE, prob = wts[[t]])
+    indices <- sample(1:N, N, replace = TRUE, prob = weights[[t]])
     particles[[t]] <- particles[[t]][indices]
-    wts[[t]] <- rep(1 / N, N)
+    weights[[t]] <- rep(1 / N, N)
   }
   
   #fallback for e[t] in case no acceptable particles
-  if (all(sapply(1:N, function(i) distance(D0, sim(
+  if (all(sapply(1:N, function(i) distance(observed_data, simulate_data(
     particles[[t]][[i]]$model, particles[[t]][[i]]$parameter))) > e[t])) {
-    e[t] <- e[t] * 1.5  #relaxing tolerance
+    e[t] <- e[t] * 1.5  # Relax the tolerance
   }
 }
 
 
+str(D_star)
+str(observed_data)
 
-#MS3 computing posterior probs
+#MS3 normalizing Weights & computing posterior probs
 
 #computing posterior probs
 posterior <- sapply(models, function(m) {
   sum(sapply(1:N, function(i) {
     if (particles[[T]][[i]]$model == m) {
-      wts[[T]][i]
+      weights[[T]][i]
     } else {
       0
     }
   }))
 })
-
-posterior <- posterior / sum(posterior)  #normalizing
+posterior <- posterior / sum(posterior)  # Normalize
 print(posterior)
 
 
@@ -207,7 +200,7 @@ print(posterior)
 plot(1:T, e, type = "b", main = "Tolerance Schedule", xlab = "Population", ylab = "Epsilon")
 
 ###ess evolution
-plot(1:T, sapply(1:T, function(t) 1 / sum(wts[[t]]^2)), type = "b", 
+plot(1:T, sapply(1:T, function(t) 1 / sum(weights[[t]]^2)), type = "b", 
      main = "Effective Sample Size (ESS)", xlab = "Population", ylab = "ESS")
 
 ###posterior parameter distribution plot
