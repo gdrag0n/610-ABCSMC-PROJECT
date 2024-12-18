@@ -1,0 +1,109 @@
+---
+title: "Untitled"
+author: "Garrett Collier"
+date: "2024-12-18"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+set.seed(12345)
+# Gillespie Model 1: X + Y -> 2Y with rate k1
+gillespie_model1 <- function(X0, Y0, k1, t_max) {
+  t <- 0
+  X <- X0
+  Y <- Y0
+  times <- c(t)
+  X_values <- c(X)
+  Y_values <- c(Y)
+
+  while (t < t_max) {
+    # Propensity function
+    a1 <- k1 * X * Y
+    a0 <- a1 # Total propensity
+
+    if (a0 == 0) break
+
+    # Time until next reaction
+    t <- t + rexp(1, rate = a0)
+
+    # Reaction occurs: X + Y -> 2Y
+    X <- X - 1
+    Y <- Y + 1
+
+    # Save values
+    times <- c(times, t)
+    X_values <- c(X_values, X)
+    Y_values <- c(Y_values, Y)
+  }
+
+  return(data.frame(times, X_values, Y_values))
+}
+
+# Gillespie Model 2: X -> Y with rate k2
+gillespie_model2 <- function(X0, Y0, k2, t_max) {
+  t <- 0
+  X <- X0
+  Y <- Y0
+  times <- c(t)
+  X_values <- c(X)
+  Y_values <- c(Y)
+
+  while (t < t_max) {
+    # Propensity function
+    a2 <- k2 * X
+    a0 <- a2 # Total propensity
+
+    if (a0 == 0) break
+
+    # Time until next reaction
+    t <- t + rexp(1, rate = a0)
+
+    # Reaction occurs: X -> Y
+    X <- X - 1
+    Y <- Y + 1
+
+    # Save values
+    times <- c(times, t)
+    X_values <- c(X_values, X)
+    Y_values <- c(Y_values, Y)
+  }
+
+  return(data.frame(times, X_values, Y_values))
+}
+
+# Initial conditions and parameters
+X0 <- 40
+Y0 <- 3
+t_max <- 0.1
+k1 <- 2.1
+k2 <- 30
+
+# Data from Table 1 (Supplementary Material)
+table1_time <- c(0.000, 0.005, 0.010, 0.015, 0.020, 0.025, 0.030, 0.035, 0.040, 0.045,
+                 0.050, 0.055, 0.060, 0.065, 0.070, 0.075, 0.080, 0.085, 0.090, 0.095)
+table1_Y <- c(3, 8, 15, 18, 23, 27, 32, 35, 37, 37, 38, 39, 40, 41, 41, 42, 42, 42, 42, 42)
+
+# Run Gillespie simulations
+results1 <- gillespie_model1(X0, Y0, k1, t_max)
+results2 <- gillespie_model2(X0, Y0, k2, t_max)
+
+# Plotting the results
+ggplot() +
+  geom_line(data = results1, aes(x = times, y = X_values), color = "red", linetype = "dashed", size = 1) +
+  geom_line(data = results1, aes(x = times, y = Y_values), color = "blue", linetype = "dashed", size = 1) +
+  geom_line(data = results2, aes(x = times, y = X_values), color = "red", linewidth = 1) +
+  geom_line(data = results2, aes(x = times, y = Y_values), color = "blue", linewidth = 1) +
+  geom_point(aes(x = table1_time, y = table1_Y), color = "blue", size = 2) +
+  labs(title = "Stochastic trajectories of species X (red) and Y (blue)",
+       x = "Time", y = "Number of molecules") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+
