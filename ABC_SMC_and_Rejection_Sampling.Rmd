@@ -1,0 +1,489 @@
+---
+title: "Final"
+output: html_document
+date: "2024-12-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r}
+# Libraries
+library(stats)
+
+# Parameters
+N <- 500  # Number of particles
+T <- 6    # Number of populations
+e <- c(9, 4, 3, 2, 1, 0)  # Tolerance schedule
+n <- 100  # Sequence length
+
+# Priors
+prior_theta0 <- function() runif(1, -5, 5)  # Uniform(-5, 5) for Model m0
+prior_theta1 <- function() runif(1, 0, 6)   # Uniform(0, 6) for Model m1
+
+# Perturbation kernels
+perturb_theta <- function(theta, sigma) {
+  runif(1, theta - sigma, theta + sigma)
+}
+
+# Simulate data for models
+simulate_data <- function(model, theta, n) {
+  if (model == 0) {  # Model m0: i.i.d. Bernoulli
+    rbinom(n, 1, prob = exp(theta) / (1 + exp(theta)))
+  } else {  # Model m1: Ising-like model
+    x <- numeric(n)
+    x[1] <- rbinom(1, 1, prob = 0.5)  # First value
+    for (i in 2:n) {
+      p <- exp(theta) / (1 + exp(theta))
+      x[i] <- ifelse(runif(1) < p, x[i - 1], 1 - x[i - 1])
+    }
+    x
+  }
+}
+
+# Sufficient statistics
+S0 <- function(x) sum(x)  # Count of 1s
+S1 <- function(x) sum(x[-1] == x[-length(x)])  # Matches between neighbors
+
+# Distance function
+distance <- function(D0, x) {
+  sqrt((S0(D0) - S0(x))^2 + (S1(D0) - S1(x))^2)
+}
+
+# Initialize particles and weights
+particles <- vector("list", T)
+weights <- vector("list", T)
+
+# Observed data (generated from model m0 with theta = 2)
+set.seed(42)
+observed_data <- simulate_data(model = 0, theta = 2, n = n)
+
+# Exclude degenerate datasets (all 0s or all 1s)
+if (S0(observed_data) == 0 || S0(observed_data) == n) {
+  stop("Degenerate observed dataset detected.")
+}
+
+# ABC SMC Algorithm
+for (t in 1:T) {
+  cat("Processing Population:", t, "\n")
+  particles[[t]] <- vector("list", N)
+  weights[[t]] <- numeric(N)
+  
+  for (i in 1:N) {
+    repeat {
+      if (t == 1) {  # Initial population
+        model <- sample(0:1, 1, prob = c(0.5, 0.5))
+        theta <- ifelse(model == 0, prior_theta0(), prior_theta1())
+      } else {  # Resample and perturb
+        idx <- sample(1:N, 1, prob = weights[[t - 1]])
+        model <- particles[[t - 1]][[idx]]$model
+        theta <- particles[[t - 1]][[idx]]$theta
+        
+        # Perturb
+        model <- ifelse(runif(1) < 0.75, model, 1 - model)  # 75% retain same model
+        sigma <- 0.5 * (max(sapply(particles[[t - 1]], function(p) p$theta)) -
+                        min(sapply(particles[[t - 1]], function(p) p$theta)))
+        theta <- perturb_theta(theta, sigma)
+      }
+      
+      # Simulate data and calculate distance
+      simulated_data <- simulate_data(model, theta, n)
+      if (distance(observed_data, simulated_data) <= e[t]) {
+        particles[[t]][[i]] <- list(model = model, theta = theta)
+        break
+      }
+    }
+    
+    # Compute weights
+    if (t == 1) {
+      weights[[t]][i] <- 1 / N  # Equal weights for the first population
+    } else {
+      previous_particles <- particles[[t - 1]]
+      previous_weights <- weights[[t - 1]]
+      numerator <- if (model == 0) dunif(theta, -5, 5) else dunif(theta, 0, 6)
+      denominator <- sum(previous_weights * sapply(1:N, function(j) {
+        if (previous_particles[[j]]$model == model) {
+          dunif(theta, previous_particles[[j]]$theta - sigma,
+                previous_particles[[j]]$theta + sigma)
+        } else {
+          0
+        }
+      }))
+      weights[[t]][i] <- numerator / denominator
+    }
+  }
+  
+  # Normalize weights
+  weights[[t]] <- weights[[t]] / sum(weights[[t]])
+}
+
+# Posterior probabilities for models
+posterior <- sapply(0:1, function(m) {
+  sum(sapply(1:N, function(i) {
+    if (particles[[T]][[i]]$model == m) weights[[T]][i] else 0
+  }))
+})
+posterior <- posterior / sum(posterior)
+print(posterior)
+
+# Visualizations
+# 1. Tolerance Schedule
+plot(1:T, e, type = "b", main = "Tolerance Schedule",
+     xlab = "Population", ylab = "Tolerance (Epsilon)")
+
+# 2. Effective Sample Size
+ess <- sapply(1:T, function(t) 1 / sum(weights[[t]]^2))
+plot(1:T, ess, type = "b", main = "Effective Sample Size (ESS)",
+     xlab = "Population", ylab = "ESS")
+
+# 3. Posterior Parameter Distribution
+hist(unlist(lapply(particles[[T]], function(p) p$theta)),
+     breaks = 20, main = "Posterior Parameter Distribution",
+     xlab = "Theta")
+
+# Benchmark: ABC Rejection Sampling
+abc_rejection <- function(N, tolerance) {
+  accepted <- list()
+  for (i in 1:N) {
+    model <- sample(0:1, 1, prob = c(0.5, 0.5))
+    theta <- if (model == 0) prior_theta0() else prior_theta1()
+    simulated_data <- simulate_data(model, theta, n)
+    if (distance(observed_data, simulated_data) <= tolerance) {
+      accepted[[length(accepted) + 1]] <- list(model = model, theta = theta)
+    }
+  }
+  return(accepted)
+}
+
+# Run ABC rejection with a single tolerance
+tolerance_rej <- 1  # Final tolerance
+accepted_particles <- abc_rejection(N, tolerance_rej)
+cat("Number of particles accepted in ABC Rejection:", length(accepted_particles), "\n")
+
+```
+
+
+
+Increasing the tolerance level to 10 for ABC Rejection.
+
+```{r}
+# Libraries
+library(stats)
+
+# Parameters
+N <- 500  # Number of particles
+T <- 6    # Number of populations
+e <- c(9, 4, 3, 2, 1, 0)  # Tolerance schedule
+n <- 100  # Sequence length
+
+# Priors
+prior_theta0 <- function() runif(1, -5, 5)  # Uniform(-5, 5) for Model m0
+prior_theta1 <- function() runif(1, 0, 6)   # Uniform(0, 6) for Model m1
+
+# Perturbation kernels
+perturb_theta <- function(theta, sigma) {
+  runif(1, theta - sigma, theta + sigma)
+}
+
+# Simulate data for models
+simulate_data <- function(model, theta, n) {
+  if (model == 0) {  # Model m0: i.i.d. Bernoulli
+    rbinom(n, 1, prob = exp(theta) / (1 + exp(theta)))
+  } else {  # Model m1: Ising-like model
+    x <- numeric(n)
+    x[1] <- rbinom(1, 1, prob = 0.5)  # First value
+    for (i in 2:n) {
+      p <- exp(theta) / (1 + exp(theta))
+      x[i] <- ifelse(runif(1) < p, x[i - 1], 1 - x[i - 1])
+    }
+    x
+  }
+}
+
+# Sufficient statistics
+S0 <- function(x) sum(x)  # Count of 1s
+S1 <- function(x) sum(x[-1] == x[-length(x)])  # Matches between neighbors
+
+# Distance function
+distance <- function(D0, x) {
+  sqrt((S0(D0) - S0(x))^2 + (S1(D0) - S1(x))^2)
+}
+
+# Initialize particles and weights
+particles <- vector("list", T)
+weights <- vector("list", T)
+
+# Observed data (generated from model m0 with theta = 2)
+set.seed(42)
+observed_data <- simulate_data(model = 0, theta = 2, n = n)
+
+# Exclude degenerate datasets (all 0s or all 1s)
+if (S0(observed_data) == 0 || S0(observed_data) == n) {
+  stop("Degenerate observed dataset detected.")
+}
+
+# ABC SMC Algorithm
+for (t in 1:T) {
+  cat("Processing Population:", t, "\n")
+  particles[[t]] <- vector("list", N)
+  weights[[t]] <- numeric(N)
+  
+  for (i in 1:N) {
+    repeat {
+      if (t == 1) {  # Initial population
+        model <- sample(0:1, 1, prob = c(0.5, 0.5))
+        theta <- ifelse(model == 0, prior_theta0(), prior_theta1())
+      } else {  # Resample and perturb
+        idx <- sample(1:N, 1, prob = weights[[t - 1]])
+        model <- particles[[t - 1]][[idx]]$model
+        theta <- particles[[t - 1]][[idx]]$theta
+        
+        # Perturb
+        model <- ifelse(runif(1) < 0.75, model, 1 - model)  # 75% retain same model
+        sigma <- 0.5 * (max(sapply(particles[[t - 1]], function(p) p$theta)) -
+                        min(sapply(particles[[t - 1]], function(p) p$theta)))
+        theta <- perturb_theta(theta, sigma)
+      }
+      
+      # Simulate data and calculate distance
+      simulated_data <- simulate_data(model, theta, n)
+      if (distance(observed_data, simulated_data) <= e[t]) {
+        particles[[t]][[i]] <- list(model = model, theta = theta)
+        break
+      }
+    }
+    
+    # Compute weights
+    if (t == 1) {
+      weights[[t]][i] <- 1 / N  # Equal weights for the first population
+    } else {
+      previous_particles <- particles[[t - 1]]
+      previous_weights <- weights[[t - 1]]
+      numerator <- if (model == 0) dunif(theta, -5, 5) else dunif(theta, 0, 6)
+      denominator <- sum(previous_weights * sapply(1:N, function(j) {
+        if (previous_particles[[j]]$model == model) {
+          dunif(theta, previous_particles[[j]]$theta - sigma,
+                previous_particles[[j]]$theta + sigma)
+        } else {
+          0
+        }
+      }))
+      weights[[t]][i] <- numerator / denominator
+    }
+  }
+  
+  # Normalize weights
+  weights[[t]] <- weights[[t]] / sum(weights[[t]])
+}
+
+# Posterior probabilities for models
+posterior <- sapply(0:1, function(m) {
+  sum(sapply(1:N, function(i) {
+    if (particles[[T]][[i]]$model == m) weights[[T]][i] else 0
+  }))
+})
+posterior <- posterior / sum(posterior)
+print(posterior)
+
+# Visualizations
+# 1. Tolerance Schedule
+plot(1:T, e, type = "b", main = "Tolerance Schedule",
+     xlab = "Population", ylab = "Tolerance (Epsilon)")
+
+# 2. Effective Sample Size
+ess <- sapply(1:T, function(t) 1 / sum(weights[[t]]^2))
+plot(1:T, ess, type = "b", main = "Effective Sample Size (ESS)",
+     xlab = "Population", ylab = "ESS")
+
+# 3. Posterior Parameter Distribution
+hist(unlist(lapply(particles[[T]], function(p) p$theta)),
+     breaks = 20, main = "Posterior Parameter Distribution",
+     xlab = "Theta")
+
+# Benchmark: ABC Rejection Sampling
+abc_rejection <- function(N, tolerance) {
+  accepted <- list()
+  for (i in 1:N) {
+    model <- sample(0:1, 1, prob = c(0.5, 0.5))
+    theta <- if (model == 0) prior_theta0() else prior_theta1()
+    simulated_data <- simulate_data(model, theta, n)
+    if (distance(observed_data, simulated_data) <= tolerance) {
+      accepted[[length(accepted) + 1]] <- list(model = model, theta = theta)
+    }
+  }
+  return(accepted)
+}
+
+# Run ABC rejection with a single tolerance
+tolerance_rej <- 10  # Final tolerance
+accepted_particles <- abc_rejection(N, tolerance_rej)
+cat("Number of particles accepted in ABC Rejection:", length(accepted_particles), "\n")
+
+```
+
+Keeping the tolerance level to 5 for ABC Rejection.
+
+
+```{r}
+# Libraries
+library(stats)
+
+# Parameters
+N <- 500  # Number of particles
+T <- 6    # Number of populations
+e <- c(9, 4, 3, 2, 1, 0)  # Tolerance schedule
+n <- 100  # Sequence length
+
+# Priors
+prior_theta0 <- function() runif(1, -5, 5)  # Uniform(-5, 5) for Model m0
+prior_theta1 <- function() runif(1, 0, 6)   # Uniform(0, 6) for Model m1
+
+# Perturbation kernels
+perturb_theta <- function(theta, sigma) {
+  runif(1, theta - sigma, theta + sigma)
+}
+
+# Simulate data for models
+simulate_data <- function(model, theta, n) {
+  if (model == 0) {  # Model m0: i.i.d. Bernoulli
+    rbinom(n, 1, prob = exp(theta) / (1 + exp(theta)))
+  } else {  # Model m1: Ising-like model
+    x <- numeric(n)
+    x[1] <- rbinom(1, 1, prob = 0.5)  # First value
+    for (i in 2:n) {
+      p <- exp(theta) / (1 + exp(theta))
+      x[i] <- ifelse(runif(1) < p, x[i - 1], 1 - x[i - 1])
+    }
+    x
+  }
+}
+
+# Sufficient statistics
+S0 <- function(x) sum(x)  # Count of 1s
+S1 <- function(x) sum(x[-1] == x[-length(x)])  # Matches between neighbors
+
+# Distance function
+distance <- function(D0, x) {
+  sqrt((S0(D0) - S0(x))^2 + (S1(D0) - S1(x))^2)
+}
+
+# Initialize particles and weights
+particles <- vector("list", T)
+weights <- vector("list", T)
+
+# Observed data (generated from model m0 with theta = 2)
+set.seed(42)
+observed_data <- simulate_data(model = 0, theta = 2, n = n)
+
+# Exclude degenerate datasets (all 0s or all 1s)
+if (S0(observed_data) == 0 || S0(observed_data) == n) {
+  stop("Degenerate observed dataset detected.")
+}
+
+# ABC SMC Algorithm
+for (t in 1:T) {
+  cat("Processing Population:", t, "\n")
+  particles[[t]] <- vector("list", N)
+  weights[[t]] <- numeric(N)
+  
+  for (i in 1:N) {
+    repeat {
+      if (t == 1) {  # Initial population
+        model <- sample(0:1, 1, prob = c(0.5, 0.5))
+        theta <- ifelse(model == 0, prior_theta0(), prior_theta1())
+      } else {  # Resample and perturb
+        idx <- sample(1:N, 1, prob = weights[[t - 1]])
+        model <- particles[[t - 1]][[idx]]$model
+        theta <- particles[[t - 1]][[idx]]$theta
+        
+        # Perturb
+        model <- ifelse(runif(1) < 0.75, model, 1 - model)  # 75% retain same model
+        sigma <- 0.5 * (max(sapply(particles[[t - 1]], function(p) p$theta)) -
+                        min(sapply(particles[[t - 1]], function(p) p$theta)))
+        theta <- perturb_theta(theta, sigma)
+      }
+      
+      # Simulate data and calculate distance
+      simulated_data <- simulate_data(model, theta, n)
+      if (distance(observed_data, simulated_data) <= e[t]) {
+        particles[[t]][[i]] <- list(model = model, theta = theta)
+        break
+      }
+    }
+    
+    # Compute weights
+    if (t == 1) {
+      weights[[t]][i] <- 1 / N  # Equal weights for the first population
+    } else {
+      previous_particles <- particles[[t - 1]]
+      previous_weights <- weights[[t - 1]]
+      numerator <- if (model == 0) dunif(theta, -5, 5) else dunif(theta, 0, 6)
+      denominator <- sum(previous_weights * sapply(1:N, function(j) {
+        if (previous_particles[[j]]$model == model) {
+          dunif(theta, previous_particles[[j]]$theta - sigma,
+                previous_particles[[j]]$theta + sigma)
+        } else {
+          0
+        }
+      }))
+      weights[[t]][i] <- numerator / denominator
+    }
+  }
+  
+  # Normalize weights
+  weights[[t]] <- weights[[t]] / sum(weights[[t]])
+}
+
+# Posterior probabilities for models
+posterior <- sapply(0:1, function(m) {
+  sum(sapply(1:N, function(i) {
+    if (particles[[T]][[i]]$model == m) weights[[T]][i] else 0
+  }))
+})
+posterior <- posterior / sum(posterior)
+print(posterior)
+
+# Visualizations
+# 1. Tolerance Schedule
+plot(1:T, e, type = "b", main = "Tolerance Schedule",
+     xlab = "Population", ylab = "Tolerance (Epsilon)")
+
+# 2. Effective Sample Size
+ess <- sapply(1:T, function(t) 1 / sum(weights[[t]]^2))
+plot(1:T, ess, type = "b", main = "Effective Sample Size (ESS)",
+     xlab = "Population", ylab = "ESS")
+
+# 3. Posterior Parameter Distribution
+hist(unlist(lapply(particles[[T]], function(p) p$theta)),
+     breaks = 20, main = "Posterior Parameter Distribution",
+     xlab = "Theta")
+
+# Benchmark: ABC Rejection Sampling
+abc_rejection <- function(N, tolerance) {
+  accepted <- list()
+  for (i in 1:N) {
+    model <- sample(0:1, 1, prob = c(0.5, 0.5))
+    theta <- if (model == 0) prior_theta0() else prior_theta1()
+    simulated_data <- simulate_data(model, theta, n)
+    if (distance(observed_data, simulated_data) <= tolerance) {
+      accepted[[length(accepted) + 1]] <- list(model = model, theta = theta)
+    }
+  }
+  return(accepted)
+}
+
+# Run ABC rejection with a single tolerance
+tolerance_rej <- 5  # Final tolerance
+accepted_particles <- abc_rejection(N, tolerance_rej)
+cat("Number of particles accepted in ABC Rejection:", length(accepted_particles), "\n")
+
+```
+
