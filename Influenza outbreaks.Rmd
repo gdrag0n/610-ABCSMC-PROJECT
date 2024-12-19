@@ -1,0 +1,576 @@
+---
+title: "610 Final project"
+output: pdf_document
+date: "2024-12-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 3.3
+
+```{r}
+
+# Observed data set for Influenza_A_H3N2 in 1977-78 and 1980-81 epidemics, Tecumseh, Michigan
+
+
+Influenza_A_H3N2 <- data.frame(
+  
+  infected_individuals = c(rep(0, 5), rep(1, 5), rep(2, 4), rep(3, 3), rep(4, 2), rep(5, 1), rep(0, 5), rep(1, 5), rep(2, 4), rep(3, 3), rep(4, 2), rep(5, 1)),
+  
+  household_size =c(c(1:5),c(1:5),c(2:5),c(3:5),c(4:5),c(5:5),c(1:5),c(1:5),c(2:5),c(3:5),c(4:5),c(5:5)),
+  
+  year = c(rep("1977-78", 20), rep("1980-81", 20)),
+  
+  count = c(66, 87, 25, 22, 4, 13, 14, 15, 9, 4, 4, 4, 9, 1, 4,  3, 1, 1, 1, 0, 44, 62, 47, 38, 9, 10, 13, 8, 11, 5, 9, 2, 7, 3, 3, 5, 1, 1, 0, 1)
+
+)
+
+
+# changing into a matrix for easy distance calculation
+
+D_77_78 <- matrix(0, nrow = 6, ncol = 5)
+D_80_81 <- matrix(0, nrow = 6, ncol = 5)
+
+data_year1 <- subset(Influenza_A_H3N2, year == "1977-78")
+data_year2 <- subset(Influenza_A_H3N2, year == "1980-81")
+
+for (i in 1:nrow(data_year1)) {
+  s <- data_year1$household_size[i]
+  j <- data_year1$infected_individuals[i]
+  D_77_78[j+1, s] <- data_year1$count[i]
+}
+
+for (i in 1:nrow(data_year2)) {
+  s <- data_year2$household_size[i]
+  j <- data_year2$infected_individuals[i]
+  D_80_81[j+1, s] <- data_year2$count[i]
+}
+
+
+
+# Total counts for each family size for each year
+
+totals_1977_78 <- aggregate(count ~ household_size, data = subset(Influenza_A_H3N2, year == "1977-78"), sum)
+
+totals_1980_81 <- aggregate(count ~ household_size, data = subset(Influenza_A_H3N2, year == "1980-81"), sum)
+
+
+
+# Observed data set for Influenza B infection in 1975-76 and Influenza A (H1N1) infection in 1978-79 epidemics, Seattle, Washington.
+
+Influenza_B_and_A_N1H1 <- data.frame(
+  
+  infected_individuals = c(rep(0, 5), rep(1, 5), rep(2, 4), rep(3, 3), rep(4, 2), rep(5, 1), rep(0, 3), rep(1, 3), rep(2, 2), rep(3, 1)),
+  
+  household_size = c(c(1:5), c(1:5), c(2:5), c(3:5), c(4:5), c(5:5), 
+    c(1:3), c(1:3), c(2:3), c(3:3)),
+  
+  year = c(rep("1975-76", 20), rep("1978-79", 9)),
+  
+  count = c(9, 12, 18, 9, 4, 1, 6, 6, 4, 3, 2, 3, 4, 0, 1, 3, 2, 0, 0, 0, 15, 12, 4, 11, 17, 4, 21, 4, 5) 
+  
+)
+
+Influenza_B_and_A_N1H1$year <- as.factor(Influenza_B_and_A_N1H1$year)
+
+
+
+# changing into a matrix for easy distance calculation
+
+D_75_76 <- matrix(0, nrow = 6, ncol = 5)
+D_78_79 <- matrix(0, nrow = 6, ncol = 5)
+
+data_year1 <- subset(Influenza_B_and_A_N1H1, year == "1975-76")
+data_year2 <- subset(Influenza_B_and_A_N1H1, year == "1978-79")
+
+for (i in 1:nrow(data_year1)) {
+  s <- data_year1$household_size[i]
+  j <- data_year1$infected_individuals[i]
+  D_75_76[j+1, s] <- data_year1$count[i]
+}
+
+for (i in 1:nrow(data_year2)) {
+  s <- data_year2$household_size[i]
+  j <- data_year2$infected_individuals[i]
+  D_78_79[j+1, s] <- data_year2$count[i]
+}
+
+
+# Total counts for each family size for each year
+
+totals_1975_76 <- aggregate(count ~ household_size, data = subset(Influenza_B_and_A_N1H1, year == "1975-76"), sum)
+
+totals_1978_79 <- aggregate(count ~ household_size, data = subset(Influenza_B_and_A_N1H1, year == "1978-79"), sum)
+
+
+# All 4 data matrix.
+
+D_77_78
+D_80_81
+
+D_75_76
+D_78_79
+
+
+
+```
+
+
+
+# Data Simulation functions
+
+
+```{r}
+
+calculate_wjs <- function(q_c, q_h) {
+  #Initialized a 5x6 matrix (excluding w00 for clarity)
+  # j > s values are assigned zero
+  w_values <- matrix(0, nrow = 6, ncol = 5)  
+  
+  # we want to calculate starting from all the w0s values to w5s.
+  for (j in 0:5) {
+    for (s in 1:5) {
+      # assigning probabilities only when j <= s
+      if (j <= s) {
+        if (s == j) {
+  
+          # summation formula for wjj (when s = j)
+          
+          w_values[j+1, s] <- 1 - sum(w_values[1:j, s])
+          
+          
+        }
+        else {
+          # formula for wjs (when j < s)
+          binom_coeff <- choose(s, j)
+          
+          if (j == 0) {
+            # As w00 = 1, skipping that term in the equation calculation
+            w_values[j+1, s] <- binom_coeff * (q_c * q_h^j)^(s - j)
+            
+          }
+          else {
+            w_values[j+1, s] <- binom_coeff * w_values[j+1, s-1] * 
+              (q_c * q_h^j)^(s - j)
+             
+          }
+        }
+      }
+    }
+  }
+  
+  return(w_values)
+}
+
+
+simulate_counts_with_family_size <- function(w_values, family_size_counts) {
+  set.seed(123)
+  simulated_counts <- matrix(0, nrow = 6, ncol = 5)
+  
+  for (s in 1:5) {
+    probs <- w_values[1:6, s]
+    
+    # Ensure no negative probabilities by replacing them with zero
+    probs[probs < 0] <- 0
+    
+    # Normalize the probabilities so they sum to 1
+    prob_sum <- sum(probs)
+    if (prob_sum > 0) {
+      probs <- probs / prob_sum
+    } else {
+      probs <- rep(1/6, 6)  # Assign uniform probabilities if all are zero (edge case)
+    }
+    
+    n_households_s <- family_size_counts[family_size_counts$household_size == s, "count"]
+    
+    if (length(n_households_s) > 0) {
+      counts <- rmultinom(1, n_households_s, probs)
+      simulated_counts[1:6, s] <- counts
+    }
+  }
+  
+  return(simulated_counts)
+}
+
+
+```
+
+
+# Simulation fucntion based on model and year 
+
+
+```{r}
+
+simulate_year <- function(parameter, family_size_counts_year1, family_size_counts_year2, model) {
+  
+  if (model == 1) {
+    w_values <- calculate_wjs(parameter$q_c, parameter$q_h)
+    D1_star <- simulate_counts_with_family_size(w_values, family_size_counts_year1)
+    D2_star <- simulate_counts_with_family_size(w_values, family_size_counts_year2)
+    
+    return(list(D1_star = D1_star, D2_star = D2_star))
+    
+  } else if (model == 2) {
+    w_values1 <- calculate_wjs(parameter$q_c1, parameter$q_h1)
+    w_values2 <- calculate_wjs(parameter$q_c2, parameter$q_h2)
+    D1_star <- simulate_counts_with_family_size(w_values1, family_size_counts_year1)
+    D2_star <- simulate_counts_with_family_size(w_values2, family_size_counts_year2)
+    
+    return(list(D1_star = D1_star, D2_star = D2_star))
+  }
+}
+
+```
+
+
+#  Function to calculate distance between observed and simulated data we use Forbenious norm.
+
+
+```{r}
+
+
+frobenius_norm <- function(observed_data_matrix, simulated_data_matrix){
+  
+  norm <- sqrt(sum((observed_data_matrix - simulated_data_matrix)^2))
+  return(norm)
+}
+
+distance <- function(D1_observed, D2_observed, D1_simulated, D2_simulated) {
+  
+  distance_D1 <- frobenius_norm(D1_observed, D1_simulated)
+  
+  distance_D2 <- frobenius_norm(D2_observed, D2_simulated)
+  
+  overall_distance <- 0.5 * (distance_D1 + distance_D2)
+  
+  return(overall_distance)
+}
+
+```
+
+# Initial variables
+
+```{r}
+
+set.seed(123)
+
+# Transition probabilities
+
+transition_probabilities <- matrix(c(
+  0.7, 0.3,  # Probability of staying in Model 1 or transitioning to Model 2
+  0.4, 0.6   # Probability of staying in Model 2 or transitioning to Model 1
+), nrow = 2, byrow = TRUE)
+
+
+# prior for the two models
+
+parameter_prior <- function() list(
+  q_c = runif(1, 0, 1),
+  q_h = runif(1, 0, 1),
+  q_c1 = runif(1, 0, 1),
+  q_h1 = runif(1, 0, 1),
+  q_c2 = runif(1, 0, 1),
+  q_h2 = runif(1, 0, 1)
+)
+
+#perturbation kernel for parameters
+
+perturb_parameters_model_2 <- function(theta, sig) {
+  set.seed(123)
+  list(
+    q_c1 = rnorm(1, mean = theta$q_c1, sd = sig),
+    q_h1 = rnorm(1, mean = theta$q_h1, sd = sig),
+    q_c2 = rnorm(1, mean = theta$q_c2, sd = sig),
+    q_h2 = rnorm(1, mean = theta$q_h2, sd = sig)
+  )
+}
+
+perturb_parameters_model_1 <- function(theta, sig) {
+  set.seed(123)
+  list(
+    q_c = rnorm(1, mean = theta$q_c, sd = sig),
+    q_h = rnorm(1, mean = theta$q_h, sd = sig)
+  )
+}
+
+
+
+```
+
+
+# ABC-SMC algorithm
+
+```{r}
+
+run_abc_smc <- function(D1, D2, totals_1, totals_2, e, N, T, parameter_prior, perturb_model_1, perturb_model_2, simulate_year, distance) {
+  # Initialize particles and weights
+  particles <- vector("list", T)
+  weights <- vector("list", T)
+  
+  # Initialize the first population
+  particles[[1]] <- lapply(1:N, function(i) {
+    model <- sample(1:2, 1)  # Randomly sample Model 1 or Model 2
+    parameter <- parameter_prior()  # Generate a full parameter set
+    list(model = model, parameter = parameter)
+  })
+  weights[[1]] <- rep(1 / N, N)  # Uniform weights for the first population
+  
+  # Sequential refinement for populations t = 2, ..., T
+  for (t in 2:T) {
+    particles[[t]] <- vector("list", N)
+    weights[[t]] <- numeric(N)
+    
+    for (i in 1:N) {
+      repeat {
+        # Resampling
+        idx <- sample(1:N, 1, prob = weights[[t - 1]])  # Resample from previous population
+        model_star <- particles[[t - 1]][[idx]]$model
+        
+        # Perturb parameters
+        parameter_star <- if (model_star == 1) {
+          perturb_model_1(particles[[t - 1]][[idx]]$parameter, sig = 0.1) 
+        } else {
+          perturb_model_2(particles[[t - 1]][[idx]]$parameter, sig = 0.1)
+        }
+        
+        # Simulate data for the current particle
+        data <- simulate_year(parameter_star, totals_1, totals_2, model_star)
+        
+        D1_star <- data$D1_star
+        D2_star <- data$D2_star
+        
+        # Calculate distance
+        dist_value <- distance(D1, D2, D1_star, D2_star)
+        
+        # Skip this particle if distance is invalid
+        if (is.na(dist_value) || is.nan(dist_value) || is.infinite(dist_value)) {
+          next  # Skip and try a new particle
+        }
+        
+        # Check acceptance
+        if (dist_value <= e[t]) {
+          particles[[t]][[i]] <- list(model = model_star, parameter = parameter_star)
+          break  # Particle accepted, exit repeat
+        }
+      }
+      
+      # Compute weights
+      weights[[t]][i] <- sum(sapply(1:N, function(j) {
+        prev_model <- particles[[t - 1]][[j]]$model
+        prev_parameter <- particles[[t - 1]][[j]]$parameter
+        weight <- 0  # Default weight
+      
+        if (prev_model == model_star) {
+          if (model_star == 1) {
+            weight <- dnorm(parameter_star$q_c, mean = prev_parameter$q_c, sd = 0.1) *
+                     dnorm(parameter_star$q_h, mean = prev_parameter$q_h, sd = 0.1)
+          } else if (model_star == 2) {
+            weight <- dnorm(parameter_star$q_c1, mean = prev_parameter$q_c1, sd = 0.1) *
+                     dnorm(parameter_star$q_h1, mean = prev_parameter$q_h1, sd = 0.1) *
+                     dnorm(parameter_star$q_c2, mean = prev_parameter$q_c2, sd = 0.1) *
+                     dnorm(parameter_star$q_h2, mean = prev_parameter$q_h2, sd = 0.1)
+          }
+        }
+        weight  # Return the computed weight
+      }))
+    }
+    
+    # Normalize weights
+    weights[[t]] <- weights[[t]] / sum(weights[[t]])
+    
+    # Handle degeneracy with ESS
+    ESS <- 1 / sum(weights[[t]]^2)
+    if (ESS < N / 2) {
+      indices <- sample(1:N, N, replace = TRUE, prob = weights[[t]])
+      particles[[t]] <- particles[[t]][indices]
+      weights[[t]] <- rep(1 / N, N)
+    }
+    
+    # Fallback for e[t] in case no acceptable particles
+    if (all(sapply(1:N, function(i) {
+      data <- simulate_year(particles[[t]][[i]]$parameter, totals_1, totals_2, particles[[t]][[i]]$model)
+      D1_star <- data$D1_star
+      D2_star <- data$D2_star
+      distance(D1, D2, D1_star, D2_star)
+    }) > e[t])) {
+      e[t] <- e[t] * 1.5  # Relax the tolerance
+    }
+  }
+  
+  return(list(particles = particles, weights = weights))
+
+}
+
+
+```
+
+
+# Running on both the datasets
+
+
+```{r}
+
+# For Dataset A
+results_A <- run_abc_smc(
+  D1 = D_77_78, 
+  D2 = D_80_81, 
+  totals_1 = totals_1977_78, 
+  totals_2 = totals_1980_81, 
+  e = c(50,20), 
+  N = 10000, 
+  T = length(e), 
+  parameter_prior = parameter_prior, 
+  perturb_model_1 = perturb_parameters_model_1, 
+  perturb_model_2 = perturb_parameters_model_2, 
+  simulate_year = simulate_year, 
+  distance = distance
+)
+
+# For Dataset B
+results_B <- run_abc_smc(
+  D1 = D_75_76, 
+  D2 = D_78_79, 
+  totals_1 = totals_1975_76, 
+  totals_2 = totals_1978_79, 
+  e = c(50,10,5), 
+  N = 1000,
+  T = length(e), 
+  parameter_prior = parameter_prior, 
+  perturb_model_1 = perturb_parameters_model_1, 
+  perturb_model_2 = perturb_parameters_model_2, 
+  simulate_year = simulate_year, 
+  distance = distance
+)
+
+```
+
+
+
+# plot for Data-set 1
+
+```{r}
+
+particles <- results_A$particles
+
+posterior_samples_model2 <- lapply(particles[[T]], function(p) {
+  if (p$model == 2) {
+    return(c(q_c1 = p$parameter$q_c1, q_h1 = p$parameter$q_h1,
+             q_c2 = p$parameter$q_c2, q_h2 = p$parameter$q_h2))
+  }
+})
+posterior_samples_model2 <- do.call(rbind, posterior_samples_model2)  
+
+library(ggplot2)
+
+posterior_year1 <- data.frame(
+  q_h = posterior_samples_model2[, "q_h1"],
+  q_c = posterior_samples_model2[, "q_c1"],
+  year = "1977-78"
+)
+
+posterior_year2 <- data.frame(
+  q_h = posterior_samples_model2[, "q_h2"],
+  q_c = posterior_samples_model2[, "q_c2"],
+  year = "1980-81"
+)
+
+posterior_data <- rbind(posterior_year1, posterior_year2)
+
+ggplot(posterior_data, aes(x = q_h, y = q_c, color = year)) +
+  geom_point(alpha = 0.6, size = 2) +
+  scale_color_manual(values = c("1977-78" = "red", "1980-81" = "blue")) +
+  labs(
+    title = "Posterior Distributions of Parameters (Four-Parameter Model)",
+    x = "q_h (Household Transmission)",
+    y = "q_c (Community Transmission)",
+    color = "Year"
+  ) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +  # Match the paper's scale
+  theme_minimal()
+
+
+```
+
+
+- The image shows that the posterior distributions of parameters for the four-parameter model, comparing community transmission (q_c) and household transmission (q_h) for the two years, 1977-78 and 1980-81 are almost similar.  
+
+
+
+# plot for Data-set 1
+
+```{r}
+
+particles <- results_B$particles 
+
+posterior_samples_model2 <- lapply(particles[[T]], function(p) {
+  if (p$model == 2) {
+    return(c(q_c1 = p$parameter$q_c1, q_h1 = p$parameter$q_h1,
+             q_c2 = p$parameter$q_c2, q_h2 = p$parameter$q_h2))
+  }
+})
+posterior_samples_model2 <- do.call(rbind, posterior_samples_model2)  
+
+library(ggplot2)
+
+
+posterior_year1 <- data.frame(
+  q_h = posterior_samples_model2[, "q_h1"],  
+  q_c = posterior_samples_model2[, "q_c1"],  
+  year = "Year B1"
+)
+
+posterior_year2 <- data.frame(
+  q_h = posterior_samples_model2[, "q_h2"],  # Swap columns
+  q_c = posterior_samples_model2[, "q_c2"],  # Swap columns
+  year = "Year B2"
+)
+
+# Combine data for both years
+posterior_data <- rbind(posterior_year1, posterior_year2)
+
+# Generate the plot
+ggplot(posterior_data, aes(x = q_h, y = q_c, color = year)) +  # Swapped axes
+  geom_point(alpha = 0.6, size = 2) +
+  scale_color_manual(values = c("Year B1" = "red", "Year B2" = "blue")) +
+  labs(
+    title = "Posterior Distributions of Parameters (Dataset B - Four-Parameter Model)",
+    x = "q_h (Household Transmission)",  # Adjusted label
+    y = "q_c (Community Transmission)",  # Adjusted label
+    color = "Year"
+  ) +
+  coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +  # Match the scale used earlier
+  theme_minimal()
+
+
+
+```
+
+
+- Outbreaks due to a different viral strain have different characteristics as indicated by the posterior distribution of the four-parameter model.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
