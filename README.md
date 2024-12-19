@@ -1,3 +1,5 @@
+# 610-ABCSMC-PROJECT
+
 This repository contains R Markdown files implementing Approximate Bayesian Computation Sequential Monte Carlo (ABC SMC) and ABC Rejection Sampling for model selection and parameter inference. It compares two models:
 
 Model m0: i.i.d. Bernoulli model.
