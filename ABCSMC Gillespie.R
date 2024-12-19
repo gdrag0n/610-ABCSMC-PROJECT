@@ -230,11 +230,17 @@ posterior <- posterior / sum(posterior)
 
 
 
-
-
-
-
 # Results
+post_df <- data.frame(probability = posterior, 
+                      model_type = c("Model 1", "Model 2"))
+ggplot(data = post_df, aes(x=model_type, y=probability)) + 
+  geom_bar(color = "black", fill = "tan", stat = "identity") +
+  labs(title = "Figure 1b: Posterior Probabilities",
+       x = "Model Type",
+       y = "Probability") +
+  theme_bw()
+ggsave("fig-1b.PNG")
+             
 print(posterior)
 plot(1:T, e, type = "b", main = "Tolerance Schedule", xlab = "Population", ylab = "Epsilon")
 hist(unlist(lapply(particles[[T]], function(p) p$parameter)), breaks = 20, main = "Posterior Distribution", xlab = "Parameter Values")
