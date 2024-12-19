@@ -1,0 +1,383 @@
+---
+title: "Untitled1"
+output: html_document
+date: "2024-12-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+Running the Algorithm for 20 data sets.
+
+
+```{r}
+library(parallel)
+
+set.seed(123)
+
+#### Parameters ####
+n_datasets <- 20     # Number of datasets for testing
+n <- 100             # Sequence length
+N <- 100             # Number of particles
+e <- c(9, 4, 3, 2, 1, 0) # Tolerance schedule
+T_ <- length(e)      # Number of populations
+pi_m0 <- 0.5         # Prior probability for model m0
+pi_m1 <- 0.5         # Prior probability for model m1
+
+#### Model Simulation ####
+simulate_data_m0 <- function(theta0, n) {
+  p <- exp(theta0) / (1 + exp(theta0))
+  rbinom(n, 1, p)
+}
+
+simulate_data_m1 <- function(theta1, n) {
+  x <- numeric(n)
+  x[1] <- rbinom(1, 1, 0.5)
+  exp_theta <- exp(min(theta1, 10))  # Prevent overflow
+  p_eq <- max(0, min(1, exp_theta / (1 + exp_theta)))  # Clamp p_eq
+  
+  for (i in 2:n) {
+    if (runif(1) < p_eq) {
+      x[i] <- x[i - 1]
+    } else {
+      x[i] <- 1 - x[i - 1]
+    }
+  }
+  x
+}
+
+
+S0 <- function(x) sum(x)
+S1 <- function(x) sum(x[-1] == x[-length(x)])
+
+f0 <- function(S0_val, n, theta0) {
+  exp(theta0 * S0_val) / ((1 + exp(theta0))^n)
+}
+
+f1 <- function(S1_val, n, theta1) {
+  exp(theta1 * S1_val) / (2 * (1 + exp(theta1))^(n - 1))
+}
+
+distance <- function(S0_D, S1_D, x) {
+  S0_x <- sum(x)
+  S1_x <- sum(x[-1] == x[-length(x)])
+  sqrt((S0_D - S0_x)^2 + (S1_D - S1_x)^2)
+}
+
+exclude_invalid_datasets <- function(x) {
+  all(x == 0) || all(x == 1)
+}
+
+#### Generate Datasets ####
+datasets_m0 <- replicate(n_datasets, {
+  theta0 <- runif(1, -5, 5)
+  list(model = 0, theta = theta0, data = simulate_data_m0(theta0, n))
+}, simplify = FALSE)
+
+datasets_m1 <- replicate(n_datasets, {
+  theta1 <- runif(1, 0, 6)
+  list(model = 1, theta = theta1, data = simulate_data_m1(theta1, n))
+}, simplify = FALSE)
+
+all_datasets <- c(datasets_m0, datasets_m1)
+all_datasets <- all_datasets[!sapply(all_datasets, function(d) exclude_invalid_datasets(d$data))]
+
+# Precompute S0(D) and S1(D) for all datasets
+S0_values <- sapply(all_datasets, function(d) S0(d$data))
+S1_values <- sapply(all_datasets, function(d) S1(d$data))
+
+#### Approximate True Posterior ####
+theta0_grid <- seq(-5, 5, length.out = 30)
+theta1_grid <- seq(0, 6, length.out = 30)
+delta0 <- (5 - (-5)) / (30 - 1)
+delta1 <- (6 - 0) / (30 - 1)
+
+compute_true_posterior_fast <- function(S0_val, S1_val, n) {
+  vals0 <- f0(S0_val, n, theta0_grid) * (1 / 10)
+  m0D <- sum(vals0) * delta0
+  
+  vals1 <- f1(S1_val, n, theta1_grid) * (1 / 6)
+  m1D <- sum(vals1) * delta1
+  
+  (m0D * pi_m0) / (m0D * pi_m0 + m1D * pi_m1)
+}
+
+true_posteriors <- mapply(compute_true_posterior_fast, S0_values, S1_values, MoreArgs = list(n = n))
+
+
+perturb_model <- function(m) {
+  if (runif(1) < 0.75) m else 1 - m
+}
+
+perturb_theta <- function(theta, theta_list, m) {
+  # Handle cases where theta_list is empty or all NA
+  if (length(theta_list) == 0 || all(is.na(theta_list))) {
+    theta_list <- c(0)
+  }
+  
+  # Calculate range, ensuring no missing values
+  rng <- max(theta_list, na.rm = TRUE) - min(theta_list, na.rm = TRUE)
+  if (rng == 0 || is.na(rng)) rng <- 1e-8  # Handle edge cases
+
+  # Calculate sigma
+  sigma <- 0.5 * rng
+
+  # Generate perturbed theta within range
+  new_theta <- runif(1, theta - sigma, theta + sigma)
+
+  # Clamp theta to valid range for the respective model
+  if (m == 0) new_theta <- max(-5, min(5, new_theta))  # Model m0 range
+  if (m == 1) new_theta <- max(0, min(6, new_theta))   # Model m1 range
+
+  return(new_theta)
+}
+
+
+
+simulate_data_from_model <- function(m, theta, n) {
+  if (m == 0) simulate_data_m0(theta, n) else simulate_data_m1(theta, n)
+}
+
+#### ABC SMC ####
+abc_smc <- function(D, S0_D, S1_D, e, N, T_, n) {
+  particles <- vector("list", T_)
+  weights <- vector("list", T_)
+  
+  for (t in 1:T_) {
+    particles[[t]] <- vector("list", N)
+    weights[[t]] <- numeric(N)
+    for (i in 1:N) {
+      repeat {
+        if (t == 1) {
+          m <- sample(0:1, 1, prob = c(0.5, 0.5))
+          theta <- if (m == 0) runif(1, -5, 5) else runif(1, 0, 6)
+        } else {
+          idx <- sample(1:N, 1, prob = weights[[t - 1]], replace = TRUE)
+          m <- particles[[t - 1]][[idx]]$model
+          theta <- particles[[t - 1]][[idx]]$theta
+          m <- perturb_model(m)
+          theta <- perturb_theta(theta, sapply(particles[[t - 1]], function(p) if (p$model == m) p$theta else NA), m)
+        }
+        X <- simulate_data_from_model(m, theta, n)
+        if (distance(S0_D, S1_D, X) <= e[t]) {
+          particles[[t]][[i]] <- list(model = m, theta = theta)
+          weights[[t]][i] <- 1
+          break
+        }
+      }
+    }
+    weights[[t]] <- weights[[t]] / sum(weights[[t]])
+  }
+  sum(sapply(1:N, function(i) if (particles[[T_]][[i]]$model == 0) weights[[T_]][i] else 0))
+}
+
+#### Run ABC SMC ####
+cat("Running ABC SMC on all datasets...\n")
+inferred_posteriors <- sapply(seq_along(all_datasets), function(idx) {
+  D <- all_datasets[[idx]]$data
+  S0_D <- S0_values[idx]
+  S1_D <- S1_values[idx]
+  abc_smc(D, S0_D, S1_D, e, N, T_, n)
+})
+
+
+plot(true_posteriors, inferred_posteriors, xlab = "P(m=0) (True)",
+     ylab = "P(m=0) (Inferred)", main = "True vs. Inferred Posterior (ABC SMC)",
+     pch = 16, col = "blue", xlim = c(0, 1), ylim = c(0, 1))
+abline(0, 1, col = "red", lty = 2)
+
+cat("Done. Results plotted.\n")
+
+```
+
+
+
+Running the Algorithm for 50 data sets.
+
+```{r}
+library(parallel)
+
+set.seed(123)
+
+#### Parameters ####
+n_datasets <- 50     # Number of datasets for testing
+n <- 200             # Sequence length
+N <- 200             # Number of particles
+e <- c(9, 4, 3, 2, 1, 0) # Tolerance schedule
+T_ <- length(e)      # Number of populations
+pi_m0 <- 0.5         # Prior probability for model m0
+pi_m1 <- 0.5         # Prior probability for model m1
+
+#### Model Simulation ####
+simulate_data_m0 <- function(theta0, n) {
+  p <- exp(theta0) / (1 + exp(theta0))
+  rbinom(n, 1, p)
+}
+
+simulate_data_m1 <- function(theta1, n) {
+  x <- numeric(n)
+  x[1] <- rbinom(1, 1, 0.5)
+  exp_theta <- exp(min(theta1, 10))  # Prevent overflow
+  p_eq <- max(0, min(1, exp_theta / (1 + exp_theta)))  # Clamp p_eq
+  for (i in 2:n) {
+    if (runif(1) < p_eq) {
+      x[i] <- x[i - 1]
+    } else {
+      x[i] <- 1 - x[i - 1]
+    }
+  }
+  x
+}
+
+S0 <- function(x) sum(x)
+S1 <- function(x) sum(x[-1] == x[-length(x)])
+
+f0 <- function(S0_val, n, theta0) {
+  exp(theta0 * S0_val) / ((1 + exp(theta0))^n)
+}
+
+f1 <- function(S1_val, n, theta1) {
+  exp(theta1 * S1_val) / (2 * (1 + exp(theta1))^(n - 1))
+}
+
+distance <- function(S0_D, S1_D, x) {
+  S0_x <- sum(x)
+  S1_x <- sum(x[-1] == x[-length(x)])
+  # Normalize by expected range
+  sqrt(((S0_D - S0_x) / n)^2 + ((S1_D - S1_x) / n)^2)
+}
+
+exclude_invalid_datasets <- function(x) {
+  all(x == 0) || all(x == 1)
+}
+
+
+datasets_m0 <- replicate(n_datasets, {
+  theta0 <- runif(1, -5, 5)
+  list(model = 0, theta = theta0, data = simulate_data_m0(theta0, n))
+}, simplify = FALSE)
+
+datasets_m1 <- replicate(n_datasets, {
+  theta1 <- runif(1, 0, 6)
+  list(model = 1, theta = theta1, data = simulate_data_m1(theta1, n))
+}, simplify = FALSE)
+
+all_datasets <- c(datasets_m0, datasets_m1)
+all_datasets <- all_datasets[!sapply(all_datasets, function(d) exclude_invalid_datasets(d$data))]
+
+# Precompute S0(D) and S1(D) for all datasets
+S0_values <- sapply(all_datasets, function(d) S0(d$data))
+S1_values <- sapply(all_datasets, function(d) S1(d$data))
+
+#### Approximate True Posterior ####
+theta0_grid <- seq(-5, 5, length.out = 30)
+theta1_grid <- seq(0, 6, length.out = 30)
+delta0 <- (5 - (-5)) / (30 - 1)
+delta1 <- (6 - 0) / (30 - 1)
+
+compute_true_posterior_fast <- function(S0_val, S1_val, n) {
+  vals0 <- f0(S0_val, n, theta0_grid) * (1 / 10)
+  m0D <- sum(vals0) * delta0
+  
+  vals1 <- f1(S1_val, n, theta1_grid) * (1 / 6)
+  m1D <- sum(vals1) * delta1
+  
+  (m0D * pi_m0) / (m0D * pi_m0 + m1D * pi_m1)
+}
+
+true_posteriors <- mapply(compute_true_posterior_fast, S0_values, S1_values, MoreArgs = list(n = n))
+
+perturb_model <- function(m) {
+  if (runif(1) < 0.75) m else 1 - m
+}
+
+perturb_theta <- function(theta, theta_list, m) {
+  # Handle cases where theta_list is empty or all NA
+  if (length(theta_list) == 0 || all(is.na(theta_list))) {
+    theta_list <- c(0)
+  }
+  
+  # Calculate range, ensuring no missing values
+  rng <- max(theta_list, na.rm = TRUE) - min(theta_list, na.rm = TRUE)
+  if (rng == 0 || is.na(rng)) rng <- 1e-8  # Handle edge cases
+
+  sigma <- 0.5 * rng
+  new_theta <- runif(1, theta - sigma, theta + sigma)
+
+  # Clamp theta to valid range for the respective model
+  if (m == 0) new_theta <- max(-5, min(5, new_theta))  # Model m0 range
+  if (m == 1) new_theta <- max(0, min(6, new_theta))   # Model m1 range
+
+  return(new_theta)
+}
+
+simulate_data_from_model <- function(m, theta, n) {
+  if (m == 0) simulate_data_m0(theta, n) else simulate_data_m1(theta, n)
+}
+
+#### ABC SMC ####
+abc_smc <- function(D, S0_D, S1_D, e, N, T_, n) {
+  particles <- vector("list", T_)
+  weights <- vector("list", T_)
+  
+  for (t in 1:T_) {
+    particles[[t]] <- vector("list", N)
+    weights[[t]] <- numeric(N)
+    for (i in 1:N) {
+      repeat {
+        if (t == 1) {
+          m <- sample(0:1, 1, prob = c(0.5, 0.5))
+          theta <- if (m == 0) runif(1, -5, 5) else runif(1, 0, 6)
+        } else {
+          idx <- sample(1:N, 1, prob = weights[[t - 1]], replace = TRUE)
+          m <- particles[[t - 1]][[idx]]$model
+          theta <- particles[[t - 1]][[idx]]$theta
+          m <- perturb_model(m)
+          theta <- perturb_theta(theta, sapply(particles[[t - 1]], function(p) if (p$model == m) p$theta else NA), m)
+        }
+        X <- simulate_data_from_model(m, theta, n)
+        if (distance(S0_D, S1_D, X) <= e[t]) {
+          particles[[t]][[i]] <- list(model = m, theta = theta)
+          weights[[t]][i] <- 1
+          break
+        }
+      }
+    }
+    weights[[t]] <- weights[[t]] / sum(weights[[t]])
+  }
+  sum(sapply(1:N, function(i) if (particles[[T_]][[i]]$model == 0) weights[[T_]][i] else 0))
+}
+
+
+cat("Running ABC SMC on all datasets...\n")
+inferred_posteriors <- sapply(seq_along(all_datasets), function(idx) {
+  D <- all_datasets[[idx]]$data
+  S0_D <- S0_values[idx]
+  S1_D <- S1_values[idx]
+  abc_smc(D, S0_D, S1_D, e, N, T_, n)
+})
+
+plot(true_posteriors, inferred_posteriors, xlab = "P(m=0) (True)",
+     ylab = "P(m=0) (Inferred)", main = "True vs. Inferred Posterior (ABC SMC)",
+     pch = 16, col = "blue", xlim = c(0, 1), ylim = c(0, 1))
+abline(0, 1, col = "red", lty = 2)
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
