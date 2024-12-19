@@ -1,12 +1,10 @@
 # 610-ABCSMC-PROJECT
 
+# Features of ABC_SMC_and_Rejection_Sampling.Rmd
 
-The file ABC_SMC_and_Rejection_Sampling.Rmd implements ABC SMC and ABC Rejection Sampling for model selection and parameter inference between two models:
-
+Models: 
 m0: i.i.d. Bernoulli.
 m1: Ising-like model.
-
-# Features
 
 Algorithms:
 ABC SMC with a decreasing tolerance schedule.
@@ -20,12 +18,13 @@ Posterior probabilities (P(m=0) and P(m=1)).
 Diagnostic plots for analysis.
 
 
-The file ABC_SMC_Model_Selection.Rmd implements Approximate Bayesian Computation Sequential Monte Carlo (ABC SMC) for model selection and parameter inference. It compares two models:
+# Features of ABC_SMC_Model_Selection.Rmd
 
+Models:
 m0: i.i.d. Bernoulli model.
 m1: Ising-like model.
 
-# Features
+Features
 Simulates data for both models and excludes degenerate datasets.
 Uses sufficient statistics (S0 and S1) and a distance metric.
 Refines posterior probabilities through particle resampling over multiple populations.
