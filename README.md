@@ -1,6 +1,7 @@
 # 610-ABCSMC-PROJECT
 
-# Features of ABC_SMC_and_Rejection_Sampling.Rmd
+# Features
+Filename: ABC_SMC_and_Rejection_Sampling.Rmd
 
 Models: 
 m0: i.i.d. Bernoulli.
@@ -18,7 +19,8 @@ Posterior probabilities (P(m=0) and P(m=1)).
 Diagnostic plots for analysis.
 
 
-# Features of ABC_SMC_Model_Selection.Rmd
+# Features
+Filename: ABC_SMC_Model_Selection.Rmd
 
 Models:
 m0: i.i.d. Bernoulli model.
